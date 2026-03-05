@@ -1,16 +1,18 @@
 # Experiment Template
 
-**Date**: 2026-03-05
-**Git Commit**: [INSERT_HASH]
-**Core Code**: [sitnikov/src/integrator/integrate.py](../../src/integrator/integrate.py)
-
 ## Description
 Briefly describe the purpose of this numerical experiment here.
 
-## Parameters
-- Eccentricity: 
-- Tolerance: 
-- Time span: 
+## Execution and Parameters
+The simulation parameters are defined in the `CONFIGURATION` block at the top of `run_experiment.py`. 
+
+To run the experiment:
+```powershell
+uv run python run_experiment.py
+```
+
+The exact parameters and git commit version for each run are automatically recorded in [metadata.json](metadata.json).
 
 ## Results Summary
 - Key findings or observations.
+
