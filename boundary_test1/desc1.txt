@@ -1,3 +1,0 @@
-Boundary shape of D0 for eps = 0.2 
-computed with 75 points, eps = 1e-2 and T_esc = 800
-First row is t and second row is v
