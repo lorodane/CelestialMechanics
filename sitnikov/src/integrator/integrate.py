@@ -1,7 +1,6 @@
 import rebound
 import numpy as np
 from scipy.optimize import brentq
-
 import warnings
 
 def initialize_simulation(e, z, z_dot, t):
@@ -15,7 +14,6 @@ def initialize_simulation(e, z, z_dot, t):
     t2 = t - k*2*np.pi
 
     a = 1/2
-    m = 1/2
     x_ph = a*(1-e)
     v_ph = 1/2*np.sqrt((1+e)/(1-e))
 
