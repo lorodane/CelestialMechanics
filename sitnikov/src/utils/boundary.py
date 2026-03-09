@@ -8,6 +8,12 @@ import rebound
 from scipy.optimize import brentq
 from scipy.interpolate import CubicSpline
 
+
+'''
+Users should only need to use B1_v_func, B2_v_func.
+And B2_return_time_lower_bound for diagnosing B2 boundary.
+'''
+
 def B2_v_func(e, dv = 1e-3, N_t = 100):
     '''
     Returns a function v(t) corresponding to boundary B2 (certain return).
