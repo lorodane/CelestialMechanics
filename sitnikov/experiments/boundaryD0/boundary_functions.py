@@ -9,6 +9,35 @@ from scipy.optimize import brentq
 from scipy.interpolate import CubicSpline
 
 
+def B2_v_func(e, dv = 1e-3, N_t = 100):
+    '''
+    Returns a function v(t) corresponding to boundary B2 (certain return).
+    The radial distance from the true boundary will be less than dv unless 
+    e is high (0.70 for default params).
+
+    N_t controls the number of sampled points and dv controls the precision
+    of each sampled point.
+    '''
+
+    if e >= 0.70:
+        raise Warning("High value of e. Consider increasing dv, N_t for high precision")
+    
+    return create_cubicspline(B2_tv_array(dv, N_t, e))
+
+def B1_v_func(e, dv = 1e-3, N_t = 100):
+    '''
+    Returns a function v(t) corresponding to boundary B1 (certain escape).
+    The radial distance from the true boundary will be less than dv unless 
+    e is high (0.70 for default params).
+
+    N_t controls the number of sampled points and dv controls the precision
+    of each sampled point.
+    '''
+
+    if e >= 0.70:
+        raise Warning("High value of e. Consider increasing dv, N_t for high precision")
+    
+    return create_cubicspline(B1_tv_array(dv, N_t, e))
 
 def _integrate_back_to_crossing(e, z0, v0, t0):
         '''
