@@ -45,8 +45,7 @@ def phi(e, v, t, t_max = 100):
     '''
 
     if v == 0:
-        warnings.warn(f"phi function got value v = 0, with t = {t}. Check this is intended", RuntimeWarning)
-        return (0,t)
+        return (0,t) # Note with this definition the function has a discontinuity at zero
 
     if v<0:
         raise ValueError(f"Velocity must be non-negative, got v = {v}")
@@ -61,13 +60,11 @@ def phi(e, v, t, t_max = 100):
     t_start = t
     
     while sim.t < t_start + t_max:
-        z_prev = sim.particles[2].z # type: ignore
         sim_prev = sim.copy()
 
-        sim.integrate(sim.t + dt)
-        z_curr = sim.particles[2].z # type: ignore
+        sim.integrate(sim.t + dt)        
         
-        if z_prev > 0 and z_curr <= 0:
+        if sim.particles[2].z < 0: 
             
             # The crossing time must be between t1 and t1 + dt 
             t1 = sim_prev.t

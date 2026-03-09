@@ -97,7 +97,7 @@ def B2_tv_array(dv, N_t, e):
         B2_tv_arr[1][i] = v_cross
         B2_tv_arr[0][i] = t_cross % (2*np.pi)
 
-    print("Points on B2 have a return time of at least {0:.3e}".format(B2_return_time_lower_bound(dv, N_t, e)))
+    # print("Points on B2 have a return time of at least {0:.3e}".format(B2_return_time_lower_bound(dv, N_t, e)))
     
     return B2_tv_arr
 
