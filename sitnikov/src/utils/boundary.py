@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import rebound
 from scipy.optimize import brentq
 from scipy.interpolate import CubicSpline
+import warnings
 
 
 '''
@@ -25,7 +26,7 @@ def B2_v_func(e, dv = 1e-3, N_t = 100):
     '''
 
     if e >= 0.70:
-        raise Warning("High value of e. Consider increasing dv, N_t for high precision")
+        warnings.warn("High value of e. Consider increasing dv, N_t for high precision", RuntimeWarning)
     
     return create_cubicspline(B2_tv_array(dv, N_t, e))
 

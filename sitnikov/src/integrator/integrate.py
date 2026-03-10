@@ -84,6 +84,24 @@ def phi(e, v, t, t_max = 100):
     
     return (None, None)
 
+def number_returns_before_escape(e, v0, t0, max_ret = 100, t_max = 100):
+    '''
+    Returns the number of returns to z=0 (capped at max_ret)
+    before the particle takes t_max or longer to return.
+    '''
+    i = 0
+    v = v0
+    t = t0
+
+    while v is not None and i < max_ret:
+        v, t = phi(e, v, t, t_max = t_max)
+        i += 1
+    
+    if v is None:
+        return i - 1
+    else:
+        return max_ret
+
 def phi_inv(e, v, t, t_max = 100):
     v1, t1 = phi(e, v, -t, t_max = t_max)
     if t1 == None: # If one is None, both are
