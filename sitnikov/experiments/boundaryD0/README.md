@@ -1,18 +1,10 @@
-# Experiment Template
+# Boundary Algorithm
 
 ## Description
-Briefly describe the purpose of this numerical experiment here.
-
-## Execution and Parameters
-The simulation parameters are defined in the `CONFIGURATION` block at the top of `run_experiment.py`. 
-
-To run the experiment:
-```powershell
-uv run python run_experiment.py
-```
-
-The exact parameters and git commit version for each run are automatically recorded in [metadata.json](metadata.json).
+We implement an algorithm to efficiently compute precise approximations for the boundary D0 which separates points that will return to z=0 in future time from those that will not return to z=0.
 
 ## Results Summary
-- Key findings or observations.
+The algorithm was implemented, tested and a lower bound for the return time was also implemented and tested to go along with the algorithm. Both are now stored in src/utils/boundary.py for future use.
+
+The computed boundaries (B2, B1) for a range of eccentricities, with default parameters dv = 1e-3, N_t = 100, have been plotted and stored in ./plots.
 
