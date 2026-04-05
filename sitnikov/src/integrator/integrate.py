@@ -1,6 +1,9 @@
 import rebound
 import numpy as np
 from scipy.optimize import brentq
+from scipy.integrate import solve_ivp
+from scipy.interpolate import CubicSpline
+import time
 import warnings
 
 def initialize_simulation(e, z, z_dot, t):
@@ -123,3 +126,264 @@ def check_escape(e, v, t, n, t_max=100):
         current_v, current_t = res
         
     return False
+
+
+class FastSitnikovSimulation:
+    """Fast, SciPy-based Sitnikov simulator with periodic focal-distance interpolation."""
+
+    def __init__(
+        self,
+        e,
+        n_focal_samples=4096,
+        rtol=1e-7,
+        atol=1e-10,
+        max_step=np.inf,
+        solver_method="RK45",
+        auto_solver_trials=4,
+        phi_time_window=20.0 * np.pi,
+        focal_interp="linear",
+    ):
+        if not (0.0 <= e < 1.0):
+            raise ValueError("e must satisfy 0 <= e < 1")
+        if n_focal_samples < 16:
+            raise ValueError("n_focal_samples must be at least 16")
+        if focal_interp not in ("linear", "cubic"):
+            raise ValueError("focal_interp must be 'linear' or 'cubic'")
+
+        self.e = float(e)
+        self.period = 2.0 * np.pi
+        self.a = 0.5
+        self.rtol = float(rtol)
+        self.atol = float(atol)
+        self.max_step = float(max_step)
+        self.phi_time_window = float(phi_time_window)
+        self.focal_interp = focal_interp
+
+        self.r_min = 0.5 * (1.0 - self.e)
+        self.r_min_sq = self.r_min * self.r_min
+        self.tau_min = np.pi * (self.r_min ** 1.5)
+
+        self._n_focal_samples = int(n_focal_samples)
+        self._t_grid = np.linspace(0.0, self.period, self._n_focal_samples, endpoint=False)
+        self.focal_distance_array = self._build_focal_distance_array(self._t_grid)
+
+        self._dt_grid = self.period / self._n_focal_samples
+        self._inv_dt_grid = 1.0 / self._dt_grid
+        self._r_periodic = np.concatenate((self.focal_distance_array, [self.focal_distance_array[0]]))
+        self._t_periodic = np.linspace(0.0, self.period, self._n_focal_samples + 1)
+
+        self._focal_spline = None
+        if self.focal_interp == "cubic":
+            self._focal_spline = CubicSpline(self._t_periodic, self._r_periodic, bc_type="periodic")
+
+        self._escape_event = self._build_escape_event()
+
+        if solver_method == "auto":
+            self.solver_method = self._choose_fastest_solver(auto_solver_trials)
+        else:
+            self.solver_method = solver_method
+
+    def _solve_kepler(self, M, tol=1e-14, max_iter=16):
+        E = np.array(M, dtype=float, copy=True)
+        for _ in range(max_iter):
+            f = E - self.e * np.sin(E) - M
+            fp = 1.0 - self.e * np.cos(E)
+            dE = f / fp
+            E -= dE
+            if np.max(np.abs(dE)) < tol:
+                break
+        return E
+
+    def _build_focal_distance_array(self, t_grid):
+        M = np.mod(t_grid, self.period)
+        E = self._solve_kepler(M)
+        return self.a * (1.0 - self.e * np.cos(E))
+
+    def _focal_distance_scalar(self, t):
+        tau = t % self.period
+        if self.focal_interp == "cubic":
+            return float(self._focal_spline(tau))
+
+        u = tau * self._inv_dt_grid
+        i = int(u)
+        frac = u - i
+        r0 = self._r_periodic[i]
+        r1 = self._r_periodic[i + 1]
+        return r0 + frac * (r1 - r0)
+
+    def focal_distance(self, t):
+        tau = np.mod(t, self.period)
+        if self.focal_interp == "cubic":
+            return self._focal_spline(tau)
+        return np.interp(tau, self._t_periodic, self._r_periodic)
+
+    def _rhs(self, t, y):
+        z, vz = y
+        r = self._focal_distance_scalar(t)
+        denom = (z * z + r * r) ** 1.5
+        return (vz, -z / denom)
+
+    def _escape_polynomial(self, z, vz):
+        vz2 = vz * vz
+        return 0.25 * vz2 * vz2 * (z * z + self.r_min_sq) - 1.0
+
+    def _is_escaped(self, z, vz):
+        return self._escape_polynomial(z, vz) >= 0.0
+
+    def _build_escape_event(self):
+        def event(t, y):
+            return self._escape_polynomial(y[0], y[1])
+
+        event.terminal = True
+        event.direction = 1.0
+        return event
+
+    def _build_gated_crossing_event(self, t0):
+        tau = self.tau_min
+        t_left = t0 + 0.4 * tau
+        t_right = t0 + 0.8 * tau
+        inv_span = 1.0 / (t_right - t_left)
+
+        def event(ti, yi):
+            if ti < t_left:
+                return 1.0
+            if ti < t_right:
+                x = (t_right - ti) * inv_span
+                return x + (1.0 - x) * yi[0]
+            return yi[0]
+
+        event.terminal = True
+        event.direction = -1.0
+        return event
+
+    def trajectory_fast(self, z0, vz0, t0, T, dt):
+        if T <= 0.0:
+            raise ValueError("T must be positive")
+        if dt <= 0.0:
+            raise ValueError("dt must be positive")
+
+        t_start = float(t0)
+        t_end = t_start + float(T)
+        t_eval = np.arange(t_start, t_end, float(dt))
+        if t_eval.size == 0 or t_eval[-1] < t_end:
+            t_eval = np.append(t_eval, t_end)
+
+        sol = solve_ivp(
+            self._rhs,
+            (t_start, t_end),
+            (float(z0), float(vz0)),
+            method=self.solver_method,
+            t_eval=t_eval,
+            rtol=self.rtol,
+            atol=self.atol,
+            max_step=self.max_step,
+        )
+        if not sol.success:
+            raise RuntimeError(f"trajectory_fast integration failed: {sol.message}")
+
+        return sol.y[0], sol.y[1]
+
+    def stroboscopic(self, z, v):
+        z0 = float(z)
+        v0 = float(v)
+
+        sol = solve_ivp(
+            self._rhs,
+            (0.0, self.period),
+            (z0, v0),
+            method=self.solver_method,
+            rtol=self.rtol,
+            atol=self.atol,
+            max_step=self.max_step,
+        )
+        if not sol.success:
+            raise RuntimeError(f"stroboscopic integration failed: {sol.message}")
+
+        return float(sol.y[0, -1]), float(sol.y[1, -1])
+
+    def _phi_fast_impl(self, v, t, method, t_max):
+        t0 = float(t)
+        v0 = float(v)
+
+        if v0 < 0.0:
+            raise ValueError(f"Velocity must be non-negative, got v = {v}")
+        if v0 == 0.0:
+            return 0.0, float(np.mod(t0, self.period))
+
+        if self._is_escaped(0.0, v0):
+            return None, None
+
+        crossing_event = self._build_gated_crossing_event(t0)
+        sol = solve_ivp(
+            self._rhs,
+            (t0, t0 + float(t_max)),
+            (0.0, v0),
+            method=method,
+            events=(crossing_event, self._escape_event),
+            rtol=self.rtol,
+            atol=self.atol,
+            max_step=self.max_step,
+        )
+        if not sol.success:
+            raise RuntimeError(f"phi_fast integration failed: {sol.message}")
+
+        t_cross = np.inf
+        t_escape = np.inf
+
+        if len(sol.t_events[0]) > 0:
+            t_cross = float(sol.t_events[0][0])
+            v_cross = float(sol.y_events[0][0][1])
+        if len(sol.t_events[1]) > 0:
+            t_escape = float(sol.t_events[1][0])
+
+        if not np.isfinite(t_cross) or t_escape <= t_cross:
+            return None, None
+
+        if v_cross > 1e-8:
+            raise RuntimeError("Detected crossing is not downward as expected")
+
+        return max(0.0, -v_cross), float(np.mod(t_cross, self.period))
+
+    def _choose_fastest_solver(self, trials):
+        '''
+        Not used by default because RK45 is generally faster for this problem.
+        Run timing trials to choose the fastest ODE solver for phi_fast.
+        '''
+        candidates = ("DOP853", "RK45")
+        trial_count = max(1, int(trials))
+        v_samples = np.linspace(0.2, 1.0, trial_count)
+        t_samples = np.linspace(0.0, self.period, trial_count, endpoint=False)
+        timings = {}
+
+        for method in candidates:
+            start = time.perf_counter()
+            for v0, t0 in zip(v_samples, t_samples):
+                self._phi_fast_impl(v0, t0, method=method, t_max=2.0 * self.period)
+            timings[method] = time.perf_counter() - start
+
+        return min(timings, key=timings.get)
+
+    def phi_fast(self, v, t, t_max=None):
+        if t_max is None:
+            t_max = self.phi_time_window
+        return self._phi_fast_impl(v=v, t=t, method=self.solver_method, t_max=t_max)
+
+    def crossings_fast(self, v, t, max_crossings=1000, t_max=None):
+        if max_crossings <= 0:
+            return 0
+
+        v_curr = float(v)
+        if v_curr < 0.0:
+            raise ValueError(f"Velocity must be non-negative, got v = {v}")
+
+        t_curr = float(np.mod(t, self.period))
+        count = 0
+
+        for _ in range(int(max_crossings)):
+            v_next, t_next = self.phi_fast(v_curr, t_curr, t_max=t_max)
+            if v_next is None:
+                break
+            count += 1
+            v_curr, t_curr = v_next, t_next
+
+        return count
