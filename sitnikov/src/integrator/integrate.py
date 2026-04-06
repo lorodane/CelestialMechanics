@@ -301,14 +301,16 @@ class FastSitnikovSimulation:
 
         return float(sol.y[0, -1]), float(sol.y[1, -1])
 
-    def _phi_fast_impl(self, v, t, method, t_max):
+    def _phi_fast_impl(self, v, t, method, t_max, return_mod_period=True):
         t0 = float(t)
         v0 = float(v)
 
         if v0 < 0.0:
             raise ValueError(f"Velocity must be non-negative, got v = {v}")
         if v0 == 0.0:
-            return 0.0, float(np.mod(t0, self.period))
+            if return_mod_period:
+                return 0.0, float(np.mod(t0, self.period))
+            return 0.0, t0
 
         if self._is_escaped(0.0, v0):
             return None, None
@@ -342,7 +344,8 @@ class FastSitnikovSimulation:
         if v_cross > 1e-8:
             raise RuntimeError("Detected crossing is not downward as expected")
 
-        return max(0.0, -v_cross), float(np.mod(t_cross, self.period))
+        t_out = float(np.mod(t_cross, self.period)) if return_mod_period else t_cross
+        return max(0.0, -v_cross), t_out
 
     def _choose_fastest_solver(self, trials):
         '''
@@ -363,12 +366,40 @@ class FastSitnikovSimulation:
 
         return min(timings, key=timings.get)
 
-    def phi_fast(self, v, t, t_max=None):
+    def phi_fast(self, v, t, t_max=None, return_mod_period=True):
         if t_max is None:
             t_max = self.phi_time_window
-        return self._phi_fast_impl(v=v, t=t, method=self.solver_method, t_max=t_max)
+        return self._phi_fast_impl(
+            v=v,
+            t=t,
+            method=self.solver_method,
+            t_max=t_max,
+            return_mod_period=return_mod_period,
+        )
 
     def crossings_fast(self, v, t, max_crossings=1000, t_max=None):
+        """
+        Count z=0 crossings by chunked trajectory integration.
+
+        Integration is performed over consecutive windows of length tau_min,
+        counting a crossing whenever the endpoint values change sign or when
+        an endpoint lands exactly on z = 0. Escape detection is checked during
+        integration and stops the count early.
+
+        Parameters
+        ----------
+        v : float
+            Initial vertical velocity at z=0.
+        t : float
+            Initial time.
+        max_crossings : int
+            Maximum number of crossings to count before stopping. If the time
+            budget is exhausted before the trajectory escapes or reaches this
+            limit, the method returns max_crossings.
+        t_max : float or None
+            Total integration time budget across the whole trajectory.
+            If None, defaults to max_crossings * self.phi_time_window.
+        """
         if max_crossings <= 0:
             return 0
 
@@ -376,14 +407,54 @@ class FastSitnikovSimulation:
         if v_curr < 0.0:
             raise ValueError(f"Velocity must be non-negative, got v = {v}")
 
-        t_curr = float(np.mod(t, self.period))
+        max_crossings_i = int(max_crossings)
+        if t_max is None:
+            t_max = max_crossings_i * self.phi_time_window
+        t_budget = float(t_max)
+        if t_budget <= 0.0:
+            return 0
+
+        t_curr = float(t)
+        z_curr = 0.0
         count = 0
 
-        for _ in range(int(max_crossings)):
-            v_next, t_next = self.phi_fast(v_curr, t_curr, t_max=t_max)
-            if v_next is None:
-                break
-            count += 1
-            v_curr, t_curr = v_next, t_next
+        if self._is_escaped(z_curr, v_curr):
+            return 0
 
+        t_end_total = t_curr + t_budget
+
+        while t_curr < t_end_total and count < max_crossings_i:
+            dt = min(self.tau_min, t_end_total - t_curr)
+            if dt <= 0.0:
+                break
+
+            sol = solve_ivp(
+                self._rhs,
+                (t_curr, t_curr + dt),
+                (z_curr, v_curr),
+                method=self.solver_method,
+                rtol=self.rtol,
+                atol=self.atol,
+                max_step=min(self.max_step, dt),
+            )
+            if not sol.success:
+                raise RuntimeError(f"crossings_fast integration failed: {sol.message}")
+
+            z_next = float(sol.y[0, -1])
+
+            # z_next == 0.0 considered for robustness
+            # If z_next == 0, there will no crossing in the next window
+            if z_curr*z_next < 0 or z_next == 0.0:
+                count = count + 1
+
+            z_curr = z_next
+            v_curr = float(sol.y[1, -1])
+            t_curr = float(sol.t[-1])
+
+            if self._is_escaped(z_curr, v_curr):
+                break
+        
+        if t_curr >= t_end_total and count < max_crossings_i:
+            warnings.warn("crossings_fast reached time budget before max_crossings")
+            return max_crossings_i
         return count
