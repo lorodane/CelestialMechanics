@@ -1,7 +1,31 @@
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
 import rebound
 from src.integrator.integrate import initialize_simulation
+
+
+def save_figure(fig: Figure, name: str, folder_path, dpi: int = 300, bbox_inches: str = "tight", extension: str = "png"):
+    """
+    Save a Matplotlib figure to a folder and return the saved path.
+
+    The helper creates the target folder if needed and raises FileExistsError
+    if the final file already exists.
+    """
+
+    folder = Path(folder_path)
+    folder.mkdir(parents=True, exist_ok=True)
+
+    extension = extension.lstrip(".")
+    save_path = folder / f"{name}.{extension}"
+
+    if save_path.exists():
+        raise FileExistsError(f"Figure already exists at {save_path}")
+
+    fig.savefig(save_path, dpi=dpi, bbox_inches=bbox_inches)
+    return save_path
 
 
 # Function to diagnose orbits
@@ -48,5 +72,18 @@ def plot_position_sitnikov(sim=None, T=None, dt=None, e = None, t=None, z=None, 
     
     plt.plot(np.arange(N)*dt, z_arr)
     plt.show()
+
+
+def polar_scatter(theta, r):
+    theta = np.asarray(theta)
+    r = np.asarray(r)
+
+    if theta.shape != r.shape:
+        raise ValueError("'theta' and 'r' must have the same shape.")
+
+    fig, ax = plt.subplots(subplot_kw={"projection": "polar"})
+    ax.scatter(theta, r)
+
+    return fig, ax
 
 
