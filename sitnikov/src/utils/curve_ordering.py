@@ -2,6 +2,36 @@ import numpy as np
 from scipy.interpolate import make_splprep
 
 
+def _signed_angular_delta(a: np.ndarray, b: np.ndarray, period: float) -> np.ndarray:
+    """Return signed shortest angular difference a-b in (-period/2, period/2]."""
+    return (a - b + 0.5 * period) % period - 0.5 * period
+
+
+def _pairwise_theta_v_distances(theta: np.ndarray, v: np.ndarray, period: float) -> np.ndarray:
+    """Pairwise distances in (theta, v) using circular theta metric."""
+    theta = np.asarray(theta, dtype=float)
+    v = np.asarray(v, dtype=float)
+
+    dtheta = _signed_angular_delta(theta[:, None], theta[None, :], period)
+    dv = v[:, None] - v[None, :]
+    D = np.sqrt(dtheta * dtheta + dv * dv)
+    np.fill_diagonal(D, np.inf)
+    return D
+
+
+def _unwrap_angles(theta: np.ndarray, period: float) -> np.ndarray:
+    """Unwrap angular samples to a continuous 1D coordinate."""
+    theta = np.asarray(theta, dtype=float)
+    if theta.size == 0:
+        return theta.copy()
+
+    steps = _signed_angular_delta(theta[1:], theta[:-1], period)
+    unwrapped = np.empty_like(theta)
+    unwrapped[0] = theta[0]
+    unwrapped[1:] = theta[0] + np.cumsum(steps)
+    return unwrapped
+
+
 def pairwise_distances(points: np.ndarray) -> np.ndarray:
     """Return pairwise Euclidean distance matrix for 2D points."""
     points = np.asarray(points, dtype=float)
@@ -24,6 +54,7 @@ def nearest_neighbor_order(
     points: np.ndarray,
     closed: bool = True,
     n_starts: int | None = None,
+    distance_matrix: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Multi-start greedy nearest-neighbor ordering."""
     points = np.asarray(points, dtype=float)
@@ -32,7 +63,12 @@ def nearest_neighbor_order(
     if n < 2:
         return np.arange(n, dtype=int), pairwise_distances(points)
 
-    D = pairwise_distances(points)
+    if distance_matrix is None:
+        D = pairwise_distances(points)
+    else:
+        D = np.asarray(distance_matrix, dtype=float)
+        if D.shape != (n, n):
+            raise ValueError("distance_matrix must have shape (n, n)")
 
     if n_starts is None or n_starts >= n:
         starts = range(n)
@@ -106,6 +142,9 @@ def order_points_nn_2opt(
     v: np.ndarray,
     n_starts: int | None = None,
     max_passes: int = 20,
+    *,
+    angular_t: bool = True,
+    t_period: float = 2.0 * np.pi,
 ) -> dict:
     """
     Order cloud points by nearest-neighbor + 2-opt.
@@ -118,14 +157,35 @@ def order_points_nn_2opt(
     if t.shape != v.shape:
         raise ValueError("t and v must have the same shape")
 
-    points = np.column_stack([t, v])
+    if angular_t:
+        t_work = np.mod(t, t_period)
+        D = _pairwise_theta_v_distances(t_work, v, t_period)
+    else:
+        t_work = t
+        points = np.column_stack([t_work, v])
+        D = pairwise_distances(points)
 
-    order_nn, D = nearest_neighbor_order(points, closed=True, n_starts=n_starts)
+    points = np.column_stack([t_work, v])
+
+    order_nn, D = nearest_neighbor_order(
+        points,
+        closed=True,
+        n_starts=n_starts,
+        distance_matrix=D,
+    )
     order = two_opt_improve(D, order_nn, closed=True, max_passes=max_passes)
 
     ordered = points[order]
     t_ord = ordered[:, 0]
     v_ord = ordered[:, 1]
+
+    if angular_t and len(t_ord) >= 2:
+        t_ord_unwrapped = _unwrap_angles(t_ord, t_period)
+        if (t_ord_unwrapped[-1] - t_ord_unwrapped[0]) < 0:
+            t_ord = t_ord[::-1]
+            v_ord = v_ord[::-1]
+            order = order[::-1]
+            order_nn = order_nn[::-1]
 
     return {
         "order": order,
@@ -148,42 +208,52 @@ def fit_closed_curve_from_cloud(
     spline_degree: int = 3,
     smoothing: float = 1e-2,
     n_eval: int = 1000,
-) -> dict:
+    angular_t: bool = True,
+    t_period: float = 2.0 * np.pi,
+):
     """
-    Order an unordered 2D cloud and fit a closed parametric spline.
+    Fit a closed spline from a polar cloud (v, t) via Cartesian coordinates.
 
-    Returns ordered points, smooth curve samples, and diagnostics.
+    The returned callable takes parameter values u and returns a 2xN array
+    containing [v(u), t(u)] where t is wrapped to [0, 2*pi).
     """
-    ordered_info = order_points_nn_2opt(t, v, n_starts=n_starts, max_passes=max_passes)
-    t_ord = ordered_info["t_ord"]
-    v_ord = ordered_info["v_ord"]
+    t = np.asarray(t, dtype=float)
+    v = np.asarray(v, dtype=float)
+    if t.shape != v.shape:
+        raise ValueError("t and v must have the same shape")
 
-    # make_splprep with periodic boundary conditions requires identical
-    # first/last samples. Close the sequence explicitly if needed.
-    if not (np.isclose(t_ord[0], t_ord[-1]) and np.isclose(v_ord[0], v_ord[-1])):
-        t_fit = np.r_[t_ord, t_ord[0]]
-        v_fit = np.r_[v_ord, v_ord[0]]
+    # Ignore angular_t and t_period by design: ordering/fitting is done in
+    # Cartesian coordinates to avoid angular seam issues.
+    x = v * np.cos(t)
+    y = v * np.sin(t)
+    points_xy = np.column_stack([x, y])
+
+    order_nn, D = nearest_neighbor_order(points_xy, closed=True, n_starts=n_starts)
+    order = two_opt_improve(D, order_nn, closed=True, max_passes=max_passes)
+    ordered_xy = points_xy[order]
+
+    x_ord = ordered_xy[:, 0]
+    y_ord = ordered_xy[:, 1]
+
+    if not (np.isclose(x_ord[0], x_ord[-1]) and np.isclose(y_ord[0], y_ord[-1])):
+        x_fit = np.r_[x_ord, x_ord[0]]
+        y_fit = np.r_[y_ord, y_ord[0]]
     else:
-        t_fit = t_ord
-        v_fit = v_ord
+        x_fit = x_ord
+        y_fit = y_ord
 
-    spl, u = make_splprep(
-        [t_fit, v_fit],
+    spl_xy, _ = make_splprep(
+        [x_fit, y_fit],
         k=spline_degree,
         s=smoothing,
         bc_type="periodic",
     )
 
-    u_fine = np.linspace(u[0], u[-1], n_eval)
-    t_smooth, v_smooth = spl(u_fine)
+    def spline_polar(u_eval):
+        u_arr = np.asarray(u_eval, dtype=float)
+        x_eval, y_eval = spl_xy(u_arr)
+        v_eval = np.sqrt(x_eval * x_eval + y_eval * y_eval)
+        t_eval = np.mod(np.arctan2(y_eval, x_eval), 2.0 * np.pi)
+        return np.vstack([v_eval, t_eval])
 
-    ordered_info.update(
-        {
-            "spline": spl,
-            "u": u,
-            "u_fine": u_fine,
-            "t_smooth": t_smooth,
-            "v_smooth": v_smooth,
-        }
-    )
-    return ordered_info
+    return spline_polar
