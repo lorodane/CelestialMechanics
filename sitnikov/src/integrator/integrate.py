@@ -311,6 +311,7 @@ class FastSitnikovSimulation:
             raise ValueError(f"Velocity must be non-negative, got v = {v}")
         if v0 <= 1e-7:
             # We increase the velocity to have a well-defined time integration.
+            warnings.warn(f"Velocity {v0} is too small for reliable integration.")
             return v0, self._phi_fast_impl(1e-6, t, method, t_max, return_mod_period)[1]
 
         if self._is_escaped(0.0, v0):
