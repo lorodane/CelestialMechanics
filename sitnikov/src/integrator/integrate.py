@@ -379,7 +379,80 @@ class FastSitnikovSimulation:
             return_mod_period=return_mod_period,
         )
 
-    def crossings_fast(self, v, t, max_crossings=1000, t_max=None):
+
+    def phi_inv_fast(self, v, t, t_max=None, return_mod_period=True):
+        if t_max is None:
+            t_max = self.phi_time_window
+
+        v_out, t_out = self._phi_fast_impl(
+            v=v,
+            t=-float(t),
+            method=self.solver_method,
+            t_max=t_max,
+            return_mod_period=return_mod_period,
+        )
+        if v_out is None or t_out is None:
+            return None, None
+        
+        return float(v_out), -float(t_out) % self.period if return_mod_period else -float(t_out)
+
+    def fast_crossings_iterated(self, v, t, max_crossings=1000, t_max=None):
+        """
+        Count returns to z=0 by iterating phi_fast.
+
+        Each iteration advances one return map step and therefore counts one
+        crossing. If the global time budget is exhausted before escape and
+        before reaching max_crossings, the method returns max_crossings.
+        """
+        if max_crossings <= 0:
+            return 0
+
+        v_curr = float(v)
+        if v_curr < 0.0:
+            raise ValueError(f"Velocity must be non-negative, got v = {v}")
+
+        max_crossings_i = int(max_crossings)
+        if t_max is None:
+            t_max = max_crossings_i * self.phi_time_window
+        t_budget = float(t_max)
+        if t_budget <= 0.0:
+            return 0
+
+        t_curr = float(t)
+        if self._is_escaped(0.0, v_curr):
+            return 0
+
+        t_end_total = t_curr + t_budget
+        count = 0
+
+        while count < max_crossings_i:
+            remaining = t_end_total - t_curr
+            if remaining <= 0.0:
+                warnings.warn("fast_crossings reached time budget before max_crossings")
+                return max_crossings_i
+
+            v_next, t_next = self._phi_fast_impl(
+                v=v_curr,
+                t=t_curr,
+                method=self.solver_method,
+                t_max=remaining,
+                return_mod_period=False,
+            )
+
+            if v_next is None or t_next is None:
+                return count
+
+            t_next_f = float(t_next)
+            if t_next_f <= t_curr:
+                raise RuntimeError("fast_crossings got a non-increasing return time")
+
+            v_curr = float(v_next)
+            t_curr = t_next_f
+            count += 1
+
+        return count
+
+    def fast_crossings_chunked(self, v, t, max_crossings=1000, t_max=None):
         """
         Count z=0 crossings by chunked trajectory integration.
 
