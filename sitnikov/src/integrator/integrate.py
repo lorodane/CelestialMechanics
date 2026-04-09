@@ -302,15 +302,16 @@ class FastSitnikovSimulation:
         return float(sol.y[0, -1]), float(sol.y[1, -1])
 
     def _phi_fast_impl(self, v, t, method, t_max, return_mod_period=True):
+        # Note the precision for values of v under 1e-7 is really bad.
+        # The integration breaks down.
         t0 = float(t)
         v0 = float(v)
 
         if v0 < 0.0:
             raise ValueError(f"Velocity must be non-negative, got v = {v}")
-        if v0 == 0.0:
-            if return_mod_period:
-                return 0.0, float(np.mod(t0, self.period))
-            return 0.0, t0
+        if v0 <= 1e-7:
+            # We increase the velocity to have a well-defined time integration.
+            return v0, self._phi_fast_impl(1e-6, t, method, t_max, return_mod_period)[1]
 
         if self._is_escaped(0.0, v0):
             return None, None
