@@ -71,7 +71,7 @@ def outer_irc_point_stable_island(
     def is_non_escaping(v_test: float) -> bool:
         if v_test < 0.0:
             return False
-        n_cross = sim.crossings_fast(v=v_test, t=t0_mod, max_crossings=int(max_crossings))
+        n_cross = sim.fast_crossings_iterated(v=v_test, t=t0_mod, max_crossings=int(max_crossings))
         return n_cross == int(max_crossings)
 
     if not is_non_escaping(v0):
