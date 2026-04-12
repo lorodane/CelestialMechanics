@@ -3,8 +3,13 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
-import rebound
-from src.integrator.integrate import initialize_simulation
+
+try:
+    import rebound
+    from src.integrator.integrate import initialize_simulation
+except Exception:
+    rebound = None
+    initialize_simulation = None
 
 
 def save_figure(fig: Figure, name: str, folder_path, dpi: int = 300, bbox_inches: str = "tight", extension: str = "png"):
@@ -56,6 +61,9 @@ def plot_position_sitnikov(sim=None, T=None, dt=None, e = None, t=None, z=None, 
     
     if not has_sim and not has_v_init and not has_z_init:
         raise ValueError("Invalid arguments. Please provide only (sim, T, dt) OR (e, v, t, T, dt) OR (e, z, z_dot, t, T, dt).")
+
+    if initialize_simulation is None:
+        raise ImportError("plot_position_sitnikov requires rebound-backed simulation support, which is unavailable in this environment.")
 
     if has_sim:
         sim2 = sim.copy() # type: ignore
