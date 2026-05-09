@@ -88,7 +88,7 @@ def B2_tv_array(dv, N_t, e):
     v2 = np.sqrt(2/np.sqrt(z0**2 + r_2**2))
 
     # We store the points in a list
-    # First the inner boundary (B2) inside of which we have certain return
+    # Inside of B2 we have certain return
     B2_tv_arr = np.zeros((2, N_t))
 
     for (i,t) in zip(range(N_t), np.linspace(0, 2*np.pi, N_t, endpoint=False)):
@@ -108,7 +108,7 @@ def B1_tv_array(dv, N_t, e):
     v1 = np.sqrt(2/np.sqrt(z0**2 + r_1**2))
 
     # We store the points in a list
-    # First the inner boundary (B2) inside of which we have certain return
+    # Outside of B1 we have certain escape
     B1_tv_arr = np.zeros((2, N_t))
 
     for (i,t) in zip(range(N_t), np.linspace(0, 2*np.pi, N_t, endpoint=False)):

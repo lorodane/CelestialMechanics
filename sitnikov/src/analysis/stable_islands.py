@@ -7,7 +7,7 @@ from src.utils.curve_ordering import fit_closed_curve_from_cloud
 
 import warnings
 
-
+# TODO: Make this method more robust
 def outer_irc_point_stable_island(
     e,
     p0,
@@ -18,10 +18,35 @@ def outer_irc_point_stable_island(
     max_iterations=10,
 ):
     """
-    Search along a fixed-t ray for the outer boundary point of a stable island.
+    Search along a fixed-t ray for an outer boundary estimate of a stable island.
 
-    A point is classified as non-escaping when
-    `sim.crossings_fast(v, t0, max_crossings=max_crossings) == max_crossings`.
+    Rationale
+    ---------
+    The boundary is detected with a finite-time non-escape criterion, which is
+    robust in practice but can be biased by KAM stickiness. The goal of this
+    routine is therefore to produce a stable outer estimate and bracket, not a
+    formal infinite-time boundary proof.
+
+    Algorithm overview
+    ------------------
+    1. Start from a trusted interior point `p0` and classify points along a
+       fixed-`t` ray as non-escaping if
+       `sim.fast_crossings_iterated(v, t0, max_crossings) == max_crossings`.
+    2. Choose initial step size `ds`:
+       - `expected_dist is None`: `ds = max(1e-4, dist_error)` and enable
+         exponential auto-expansion.
+       - `expected_dist` given: `ds = max(expected_dist/10, dist_error/10)`.
+    3. Advance until first escape detection; if auto-expansion is enabled,
+       double `ds` on each non-escaping step.
+    4. On first escape at `v_escape`, retreat by three steps,
+       `v_back_three = v_escape - sign * 3*ds`, to get a conservative interior
+       estimate before refining.
+    5. If the retreat overshoots the current refinement start, reduce step size
+       with `ds = (v_escape - v_start)/6` and retry locally.
+    6. Use `distance_estimate = 3*ds` as the local bracket scale; if below
+       `dist_error`, return converged. Otherwise restart refinement from
+       `v_start = v_back_three` with
+       `ds = max(distance_estimate/10, dist_error/10)`.
 
     Parameters
     ----------
@@ -106,6 +131,10 @@ def outer_irc_point_stable_island(
                 if auto_expand:
                     ds *= 2.0
                 continue
+
+            # In this case, v_next leads to escape
+            # The following assumes v_next - sign*k*ds have all been confirmed to be non-escaping
+            # which might be wrong in the auto-expand = True case
 
             v_escape = v_next
             v_back_three = v_escape - sign * 3.0 * ds
